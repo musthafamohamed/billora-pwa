@@ -7,9 +7,9 @@ html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
 .dark { color-scheme: dark; --bg: #111112; --surface: #1b1b1d; --ink: #f5f5f7; --muted: #a1a1a6; --fill: #27272a; --fill-strong: #36363a; --line: rgba(255,255,255,.12); --accent: #f5f5f7; --on-accent: #111112; --accent-strong: #d6d6da; --danger: #f07167; }
 body { min-width: 320px; background: var(--fill); color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", Inter, sans-serif; letter-spacing: -.012em; text-rendering: optimizeLegibility; }
 input, select, textarea { font-size: 16px; }
-button, input, select, textarea { -webkit-tap-highlight-color: transparent; }
+button, summary, input, select, textarea { -webkit-tap-highlight-color: transparent; }
 button, a, input, select, textarea { transition: color var(--transition-fast) var(--ease-ios), background-color var(--transition-fast) var(--ease-ios), border-color var(--transition-fast) var(--ease-ios), box-shadow var(--transition-fast) var(--ease-ios), transform var(--transition-fast) var(--ease-ios); }
-button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 35%, transparent); outline-offset: 2px; }
+button:focus-visible, summary:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 35%, transparent); outline-offset: 2px; }
 button:active:not(:disabled) { transform: scale(.985); }
 
 /* These overrides sit after Tailwind: presentation changes, no markup/data contract changes. */

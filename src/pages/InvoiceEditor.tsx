@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../lib/store';
 import { calcInvoice, validateForFinalize, validateInvoiceDraft, type DraftLine } from '../lib/calc';
 import { getLastTaxSplit, setLastTaxSplit } from '../lib/lastTaxSplit';
 import { isSystemNote } from '../lib/systemNote';
 import { nextInvoiceNumber } from '../lib/invoiceNumber';
+import { clearInvoiceRecovery, readInvoiceRecovery, writeInvoiceRecovery, type InvoiceRecovery } from '../lib/invoiceRecovery';
+import { InvoiceSaveQueue } from '../lib/invoiceSaving';
 import { fmtDate, inr } from '../lib/format';
 import {
   businessSnapshotOf, customerSnapshotOf, nowISO, todayISO, uid,
@@ -32,31 +34,35 @@ export default function InvoiceEditor({ id, navigate }: { id?: string; navigate:
   const { profile, customers, products, invoices, upsertInvoice, upsertCustomer } = useStore();
   const existing = id ? invoices.find((i) => i.id === id) : undefined;
 
-  const [invoiceId] = useState(() => existing?.id ?? uid());
-  const [invoiceNumber, setInvoiceNumber] = useState('');
-  const [invoiceType, setInvoiceType] = useState<'TAX' | 'NON_TAX'>(existing?.invoiceType ?? 'TAX');
-  const [issueDate, setIssueDate] = useState(existing?.issueDate ?? todayISO());
-  const [dueDate, setDueDate] = useState(existing?.dueDate ?? '');
-  const [customerId, setCustomerId] = useState(existing?.customerId ?? '');
-  const [lines, setLines] = useState<EditorLine[]>(() =>
-    existing ? existing.lineItems.map((l) => ({ ...l })) : [],
-  );
-  const [notes, setNotes] = useState(existing?.notes ?? '');
-  const [terms, setTerms] = useState(existing?.termsAndConditions ?? profile.termsAndConditions);
-  // Invoice-level additional charge (Rent by default, editable label).
-  const [chargeLabel, setChargeLabel] = useState(existing?.additionalChargeLabel ?? 'Rent');
-  const [chargeAmount, setChargeAmount] = useState(existing?.additionalChargeAmount ?? 0);
-  // Tax-split override, TAX invoices only; AUTO = state-based default.
-  // New invoices start with the last split the operator chose (kept in
-  // localStorage); editing an existing invoice always starts from that
-  // invoice's own stored split, never from the remembered one.
-  const [taxSplit, setTaxSplit] = useState<TaxSplit>(existing?.taxSplit ?? getLastTaxSplit());
+  const [recovered] = useState(() => readInvoiceRecovery(id, invoices));
+  const [invoiceId] = useState(() => recovered?.invoiceId ?? existing?.id ?? uid());
+  const [createdAt] = useState(() => recovered?.createdAt ?? existing?.createdAt ?? nowISO());
+  const [invoiceNumber] = useState(() => {
+    const number = recovered?.invoiceNumber ?? existing?.invoiceNumber;
+    const collides = number && invoices.some(i => i.id !== invoiceId && i.invoiceNumber === number);
+    if (number && !collides && !number.endsWith('-COPY')) return number;
+    const year = new Date(recovered?.issueDate ?? existing?.issueDate ?? todayISO()).getFullYear();
+    return nextInvoiceNumber(invoices.map(i => i.invoiceNumber), profile.invoicePrefix || 'INV', year);
+  });
+  const [invoiceType, setInvoiceType] = useState<'TAX' | 'NON_TAX'>(recovered?.invoiceType ?? existing?.invoiceType ?? 'TAX');
+  const [issueDate, setIssueDate] = useState(recovered?.issueDate ?? existing?.issueDate ?? todayISO());
+  const [dueDate, setDueDate] = useState(recovered?.dueDate ?? existing?.dueDate ?? '');
+  const [customerId, setCustomerId] = useState(recovered?.customerId ?? existing?.customerId ?? '');
+  const [lines, setLines] = useState<EditorLine[]>(() => recovered?.lines ?? existing?.lineItems.map(l => ({ ...l })) ?? []);
+  const [notes, setNotes] = useState(recovered?.notes ?? existing?.notes ?? '');
+  const [terms, setTerms] = useState(recovered?.terms ?? existing?.termsAndConditions ?? profile.termsAndConditions);
+  const [chargeLabel, setChargeLabel] = useState(recovered?.chargeLabel ?? existing?.additionalChargeLabel ?? 'Rent');
+  const [chargeAmount, setChargeAmount] = useState(recovered?.chargeAmount ?? existing?.additionalChargeAmount ?? 0);
+  const [taxSplit, setTaxSplit] = useState<TaxSplit>(recovered?.taxSplit ?? existing?.taxSplit ?? getLastTaxSplit());
   const onTaxSplitChange = (v: TaxSplit) => {
     setTaxSplit(v);
     setLastTaxSplit(v); // remembered immediately, even if this draft is discarded
   };
   const [errors, setErrors] = useState<string[]>([]);
   const [savedAt, setSavedAt] = useState('');
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'local' | 'error'>(existing ? 'saved' : 'idle');
+  const [submitting, setSubmitting] = useState(false);
+  const [retry, setRetry] = useState(0);
   const [showCustomers, setShowCustomers] = useState(false);
   const [showAddCustomer, setShowAddCustomer] = useState(false);
   const [customerQuery, setCustomerQuery] = useState('');
@@ -64,24 +70,18 @@ export default function InvoiceEditor({ id, navigate }: { id?: string; navigate:
   const [productQuery, setProductQuery] = useState('');
   const [showCustom, setShowCustom] = useState(false);
   const [confirmZero, setConfirmZero] = useState(false);
-  const [savedOnce, setSavedOnce] = useState(false);
+  const saveRef = useRef(upsertInvoice);
+  saveRef.current = upsertInvoice;
+  const [saveQueue] = useState(() => new InvoiceSaveQueue(inv => saveRef.current(inv)));
+  const stopping = useRef(false);
+  const durable = useRef(true);
+  const databaseSaved = useRef(!!existing);
   const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Assign a deterministic number once (new drafts), or repair a
-  // duplicated draft's number (e.g. a -COPY) so numbers stay unique.
+  const mounted = useRef(false);
   useEffect(() => {
-    if (existing) {
-      const collides = invoices.some((i) => i.id !== existing.id && i.invoiceNumber === existing.invoiceNumber);
-      if (collides || existing.invoiceNumber.endsWith('-COPY')) {
-        setInvoiceNumber(nextInvoiceNumber(invoices.map((i) => i.invoiceNumber), profile.invoicePrefix || 'INV', new Date(existing.issueDate).getFullYear()));
-      } else {
-        setInvoiceNumber(existing.invoiceNumber);
-      }
-    } else {
-      setInvoiceNumber((prev) => prev || nextInvoiceNumber(invoices.map((i) => i.invoiceNumber), profile.invoicePrefix || 'INV', new Date().getFullYear()));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    mounted.current = true;
+    return () => { mounted.current = false; saveQueue.cancelPendingDrafts(); };
+  }, [saveQueue]);
 
   const customer = customers.find((c) => c.id === customerId) ?? null;
   const totals = useMemo(
@@ -107,44 +107,96 @@ export default function InvoiceEditor({ id, navigate }: { id?: string; navigate:
       additionalChargeLabel: chargeLabel.trim(), additionalChargeAmount: totals.additionalChargeAmount,
       taxSplit: invoiceType === 'TAX' ? taxSplit : 'AUTO',
       grandTotal: totals.grandTotal, notes, termsAndConditions: terms,
-      createdAt: existing?.createdAt ?? nowISO(), updatedAt: nowISO(),
+      createdAt, updatedAt: nowISO(),
     };
   };
 
-  // Autosave drafts (never autosaves a FINAL invoice).
-  useEffect(() => {
-    if (existing && existing.status !== 'DRAFT') return;
-    if (!invoiceNumber || !customerId || lines.length === 0) return;
-    if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
-    autosaveTimer.current = setTimeout(async () => {
-      const inv = buildInvoice('DRAFT');
-      if (inv) { await upsertInvoice(inv); setSavedOnce(true); setSavedAt(new Date().toLocaleTimeString('en-IN')); }
+  const recovery = useMemo<InvoiceRecovery>(() => ({
+    invoiceId, invoiceNumber, invoiceType, issueDate, dueDate, customerId, lines,
+    notes, terms, chargeLabel, chargeAmount, taxSplit, createdAt, updatedAt: nowISO(),
+    baseUpdatedAt: invoices.find(i => i.id === invoiceId)?.updatedAt ?? '',
+    // Store raw editor inputs: even an unfinished invoice without customer/items is recoverable.
+    // Database reloads after autosave must not count as new edits.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [invoiceId, invoiceNumber, invoiceType, issueDate, dueDate, customerId, lines, notes, terms, chargeLabel, chargeAmount, taxSplit, createdAt]);
+  const initialRecovery = useRef(recovery);
+  const latestRecovery = useRef(recovery);
+  latestRecovery.current = recovery;
+  const dirty = !!recovered || recovery !== initialRecovery.current;
+  const currentInvoice = invoices.find(i => i.id === invoiceId);
+  const locked = (id && !existing) || (currentInvoice && currentInvoice.status !== 'DRAFT');
+
+  useLayoutEffect(() => {
+    if (!dirty || locked || stopping.current) return;
+    databaseSaved.current = false;
+    durable.current = writeInvoiceRecovery(id, recovery);
+    const inv = customer && lines.length ? buildInvoice('DRAFT') : null;
+    if (!inv) { setSaveState(durable.current ? 'local' : 'error'); return; }
+    inv.updatedAt = recovery.updatedAt;
+    setSaveState('saving');
+    autosaveTimer.current = setTimeout(() => {
+      void saveQueue.draft(inv).then(() => {
+        if (stopping.current || !mounted.current) return;
+        // Preserve edits typed while this write was in flight; never replace them with its older snapshot.
+        durable.current = writeInvoiceRecovery(id, { ...latestRecovery.current, baseUpdatedAt: inv.updatedAt });
+        if (latestRecovery.current !== recovery) return;
+        databaseSaved.current = true;
+        if (mounted.current) { setSaveState('saved'); setSavedAt(new Date().toLocaleTimeString('en-IN')); }
+      }).catch(() => {
+        if (mounted.current && latestRecovery.current === recovery && !stopping.current) setSaveState('error');
+      });
     }, 900);
     return () => { if (autosaveTimer.current) clearTimeout(autosaveTimer.current); };
+    // Only input changes (or Retry), never an IndexedDB reload, schedule a write.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [customerId, lines, notes, terms, invoiceType, issueDate, dueDate, invoiceNumber, chargeLabel, chargeAmount, taxSplit]);
+  }, [recovery, retry, locked]);
 
-  if (existing && existing.status !== 'DRAFT') {
+  useEffect(() => {
+    const beforeUnload = (e: BeforeUnloadEvent) => {
+      if (dirty && !durable.current && !databaseSaved.current) { e.preventDefault(); e.returnValue = ''; }
+    };
+    window.addEventListener('beforeunload', beforeUnload);
+    return () => window.removeEventListener('beforeunload', beforeUnload);
+  }, [dirty]);
+
+  if (locked) {
     return (
       <div className="space-y-4">
-        <p className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5">
-          This invoice is <strong>{existing.status.toLowerCase()}</strong> and cannot be edited.
-          Duplicate it from the invoice view to make a corrected copy.
+        <p className="rounded-2xl border border-slate-200 dark:border-slate-700 p-5">
+          {currentInvoice ? `This invoice is ${currentInvoice.status.toLowerCase()} and cannot be edited.` : 'This invoice is no longer available.'}
         </p>
-        <button type="button" className={btnPrimary} onClick={() => navigate('invoice-detail', existing.id)}>View invoice</button>
+        <button type="button" className={btnPrimary} onClick={() => navigate(currentInvoice ? 'invoice-detail' : 'invoices', currentInvoice?.id)}>View invoices</button>
       </div>
     );
   }
+
+  const persistAndLeave = async (inv: Invoice, route: Route) => {
+    if (stopping.current) return;
+    stopping.current = true;
+    setSubmitting(true);
+    setSaveState('saving');
+    if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
+    try {
+      await saveQueue.finish(inv);
+      // The saved invoice remains valid after navigation, but this completion
+      // no longer owns the route or a working copy opened by a newer editor.
+      if (!mounted.current) return;
+      clearInvoiceRecovery(id);
+      databaseSaved.current = true;
+      navigate(route, route === 'invoice-detail' ? inv.id : undefined);
+    } catch {
+      stopping.current = false;
+      if (mounted.current) setSaveState('error');
+    } finally { if (mounted.current) setSubmitting(false); }
+  };
 
   const saveDraft = async () => {
     const errs = validateInvoiceDraft(customerId, lines);
     if (errs.length) { setErrors(errs); return; }
     const inv = buildInvoice('DRAFT');
     if (!inv) return;
-    await upsertInvoice(inv);
-    setSavedOnce(true);
     setErrors([]);
-    navigate('invoices');
+    await persistAndLeave(inv, 'invoices');
   };
 
   const finalize = async () => {
@@ -152,6 +204,7 @@ export default function InvoiceEditor({ id, navigate }: { id?: string; navigate:
     // price 0 (a price never entered) must not become a final invoice.
     // Drafts may still be saved incomplete.
     const errs = validateForFinalize(customerId, lines);
+    if (!issueDate) errs.push('Enter an invoice date before finalizing.');
     if (errs.length) { setErrors(errs); return; }
     if (totals.grandTotal === 0) { setConfirmZero(true); return; }
     await doFinalize();
@@ -159,8 +212,7 @@ export default function InvoiceEditor({ id, navigate }: { id?: string; navigate:
   const doFinalize = async () => {
     const inv = buildInvoice('FINAL');
     if (!inv) return;
-    await upsertInvoice(inv);
-    navigate('invoice-detail', inv.id);
+    await persistAndLeave(inv, 'invoice-detail');
   };
 
   const updateLine = (lineId: string, patch: Partial<EditorLine>) => {
@@ -191,12 +243,23 @@ export default function InvoiceEditor({ id, navigate }: { id?: string; navigate:
   };
 
   return (
-    <div className="space-y-4 pb-2">
-      <header className="flex items-center justify-between gap-2">
+    <fieldset aria-label="Invoice draft" disabled={submitting} className="min-w-0 space-y-4 border-0 pb-2" aria-busy={submitting}>
+      <header className="flex flex-wrap items-center justify-between gap-2">
         <button type="button" className="inline-flex min-h-[44px] items-center gap-1 px-2 font-semibold text-teal-700 dark:text-teal-300" onClick={() => navigate('invoices')}><Icon name="chevronLeft" /> Back</button>
-        <span className="rounded-full bg-amber-100 dark:bg-amber-900/40 px-3 py-1 text-sm font-semibold text-amber-900 dark:text-amber-100">● Draft{savedOnce && savedAt ? ` · Autosaved ${savedAt}` : ''}</span>
+        <span className="rounded-full bg-amber-100 dark:bg-amber-900/40 px-3 py-1 text-sm font-semibold text-amber-900 dark:text-amber-100">● Draft</span>
         <button type="button" className={btnSecondary} onClick={saveDraft}>Save draft</button>
       </header>
+
+      <p role="status" aria-live="polite" className="text-sm text-slate-600 dark:text-slate-400">
+        {saveState === 'saving' ? 'Saving…' : saveState === 'saved' ? `Saved${savedAt ? ` at ${savedAt}` : ''}` : saveState === 'local' ? 'Saved on this device. Select a customer and add an item to save an invoice.' : saveState === 'idle' ? 'Your draft will be saved as you edit.' : ''}
+      </p>
+      {recovered && <p className="text-sm text-slate-600 dark:text-slate-400">Recovered your unfinished draft. Save draft when you are ready to keep it in your invoice list.</p>}
+      {saveState === 'error' && (
+        <div role="alert" className="rounded-xl bg-red-50 dark:bg-red-900/40 p-3 text-sm text-red-800 dark:text-red-100">
+          <p>Couldn't save{durable.current ? ' the invoice. Your latest edits are kept on this device.' : '. Browser storage is unavailable. Keep this page open until saving succeeds.'}</p>
+          <button type="button" className={`${btnSecondary} mt-2`} onClick={() => setRetry(n => n + 1)}>Retry saving</button>
+        </div>
+      )}
 
       {errors.length > 0 && (
         <div role="alert" className="rounded-xl bg-red-50 dark:bg-red-900/40 p-3 text-sm font-medium text-red-800 dark:text-red-100">
@@ -436,6 +499,6 @@ export default function InvoiceEditor({ id, navigate }: { id?: string; navigate:
           onConfirm={async () => { setConfirmZero(false); await doFinalize(); }}
         />
       )}
-    </div>
+    </fieldset>
   );
 }

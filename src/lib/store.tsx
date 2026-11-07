@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import { db, getMeta, getProfile, saveProfile, setMeta } from './db';
 import type { BusinessProfile, Customer, Invoice, Product } from './types';
 import { emptyProfile, nowISO } from './types';
+import { assertInvoiceWrite } from './invoiceSaving';
 import { planStarterAdditions, shouldSeedStarter, starterIdFor, STARTER_PRODUCTS } from './starter';
 
 // In-memory guard so two concurrent reload() calls (e.g. StrictMode's
@@ -134,7 +135,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     upsertProduct: async (p) => { await db.products.put(p); await reload(); },
     deleteProduct: async (id) => { await db.products.delete(id); await reload(); },
     upsertCustomer: async (c) => { await db.customers.put(c); await reload(); return c; },
-    upsertInvoice: async (inv) => { await db.invoices.put(inv); await reload(); },
+    upsertInvoice: async (inv) => {
+      // Read/check/write atomically: a stale editor in another tab must never
+      // downgrade a final/cancelled invoice after its own autosave delay.
+      await db.transaction('rw', db.invoices, async () => {
+        assertInvoiceWrite(await db.invoices.get(inv.id), inv);
+        await db.invoices.put(inv);
+      });
+      await reload();
+    },
     deleteInvoice: async (id) => { await db.invoices.delete(id); await reload(); },
     setWelcomed: async () => { await db.meta.put({ key: 'welcomed', value: '1' }); setWelcomedState(true); },
     replaceAll: async (prof, prods, custs, invs) => {

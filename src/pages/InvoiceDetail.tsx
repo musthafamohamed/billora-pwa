@@ -3,6 +3,7 @@ import { useStore } from '../lib/store';
 import { fmtDate, inr } from '../lib/format';
 import { amountInWords } from '../lib/words';
 import { buildInvoicePdf, downloadBlob, sharePdf } from '../lib/pdf';
+import { openPdfForPrint } from '../lib/printPdf';
 import { nowISO, uid, type Invoice } from '../lib/types';
 import { btnPrimary, btnSecondary, ConfirmDialog, StatusBadge } from '../components/ui';
 import { Icon } from '../components/Icon';
@@ -27,6 +28,22 @@ export default function InvoiceDetail({ id, navigate }: { id: string; navigate: 
   const download = () => {
     try { downloadBlob(buildInvoicePdf(inv), `${inv.invoiceNumber}.pdf`); setMsg('PDF downloaded.'); setErr(''); }
     catch { setErr('Could not generate the PDF. Please try again.'); }
+  };
+  const print = () => {
+    setMsg('');
+    try {
+      const result = openPdfForPrint(buildInvoicePdf(inv));
+      if (result === 'opened') {
+        setErr('');
+        setMsg('PDF opened in a new tab. Use the PDF viewer’s Print option.');
+      } else {
+        setErr(result === 'blocked'
+          ? 'Your browser blocked the PDF tab. Allow pop-ups for this app, or use Download PDF and print the saved file.'
+          : 'This browser cannot display PDFs. Use Download PDF, then open the saved file in a PDF app to print it.');
+      }
+    } catch {
+      setErr('Could not open the PDF. Try Download PDF, then print the saved file.');
+    }
   };
   const share = async () => {
     try {
@@ -154,7 +171,7 @@ export default function InvoiceDetail({ id, navigate }: { id: string; navigate: 
       <div className="grid grid-cols-2 gap-3">
         <button type="button" className={btnPrimary} onClick={download}><Icon name="download" /> Download PDF</button>
         <button type="button" className={btnSecondary} onClick={share}><Icon name="share" /> Share PDF</button>
-        <button type="button" className={btnSecondary} onClick={() => { try { downloadBlob(buildInvoicePdf(inv), `${inv.invoiceNumber}.pdf`); window.print(); } catch { setErr('Could not generate the PDF. Please try again.'); } }}><Icon name="printer" /> Print PDF</button>
+        <button type="button" className={btnSecondary} onClick={print}><Icon name="printer" /> Print PDF</button>
         {inv.status === 'DRAFT' && <button type="button" className={btnSecondary} onClick={() => navigate('invoice-new', inv.id)}><Icon name="pencil" /> Edit draft</button>}
         <button type="button" className={btnSecondary} onClick={duplicate}>⧉ Duplicate as draft</button>
         {!isSecureContext && (

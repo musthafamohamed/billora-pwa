@@ -64,7 +64,7 @@ export default function App() {
   }
 
   const showNav = current.route !== 'welcome';
-  const showFab = current.route !== 'invoice-new' && current.route !== 'welcome';
+  const showFab = current.route === 'invoices' || current.route === 'customers' || current.route === 'products';
 
   return (
     <div className="mx-auto min-h-screen max-w-[520px] bg-white dark:bg-slate-950 shadow-sm sm:border-x sm:border-slate-200 dark:border-slate-700">
@@ -72,7 +72,7 @@ export default function App() {
         {current.route === 'home' && <Dashboard navigate={navigate} />}
         {current.route === 'invoices' && <Invoices navigate={navigate} />}
         {current.route === 'invoice-detail' && current.id && <InvoiceDetail id={current.id} navigate={navigate} />}
-        {current.route === 'invoice-new' && <InvoiceEditor id={current.id} navigate={navigate} />}
+        {current.route === 'invoice-new' && <InvoiceEditor key={current.id ?? 'new'} id={current.id} navigate={navigate} />}
         {current.route === 'customers' && <Customers navigate={navigate} />}
         {current.route === 'products' && <Products />}
         {current.route === 'reports' && <Reports />}
@@ -85,9 +85,10 @@ export default function App() {
           type="button"
           onClick={() => navigate('invoice-new')}
           aria-label="Create invoice"
-          className="fixed bottom-[76px] right-4 z-40 flex min-h-[56px] min-w-[56px] items-center gap-2 rounded-full bg-teal-700 px-5 py-3 text-base font-bold text-white shadow-lg sm:right-[calc(50%-240px)]"
+          title="Create invoice"
+          className="fixed bottom-[calc(76px+env(safe-area-inset-bottom))] right-4 z-40 flex h-12 w-12 items-center justify-center gap-2 rounded-full bg-teal-700 text-sm font-semibold text-white shadow-lg sm:right-[calc(50%-240px)] sm:w-auto sm:px-4 md:bottom-6"
         >
-          <span aria-hidden="true" className="text-xl">＋</span> Create Invoice
+          <span aria-hidden="true" className="text-2xl">＋</span><span className="hidden sm:inline">Create Invoice</span>
         </button>
       )}
       {showNav && <BottomNav route={current.route} navigate={navigate} />}

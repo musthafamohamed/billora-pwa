@@ -9,6 +9,7 @@ import { Icon } from '../components/Icon';
 import { MAX_ACTIVE_PRODUCTS } from '../lib/types';
 
 const UNITS = ['Piece', 'Kg', 'Box', 'Service', 'Litre', 'Pack', 'Hour'];
+const productActionCls = 'sb-btn-secondary inline-flex items-center justify-center gap-1.5 px-3 py-2';
 
 export default function Products() {
   const { products, invoices, upsertProduct, deleteProduct } = useStore();
@@ -85,11 +86,13 @@ export default function Products() {
         </button>
       </header>
       {atLimit && (
-        <p role="status" className="rounded-xl border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/40 p-3 text-sm text-amber-900 dark:text-amber-100">
-          You have reached the limit of {MAX_ACTIVE_PRODUCTS} active products. Add Product still works — a new
-          product will be added as Inactive (or deactivate one first, then add it as Active).
-          Inactive products stay available on old invoices but cannot be picked for new ones.
-        </p>
+        <div role="status" className="rounded-xl border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/40 p-3 text-sm text-amber-900 dark:text-amber-100">
+          <p>{active}/{MAX_ACTIVE_PRODUCTS} active. New products will be inactive.</p>
+          <details className="mt-1">
+            <summary className="min-h-[44px] cursor-pointer content-center font-semibold">How to activate another product</summary>
+            <p className="mt-1">Deactivate a product, then activate the one you want to use. Inactive products stay on old invoices but cannot be selected for new ones.</p>
+          </details>
+        </div>
       )}
       {productMsg && <p role="status" className="rounded-xl bg-emerald-50 dark:bg-emerald-900/40 p-3 text-sm font-medium text-emerald-900 dark:text-emerald-100">{productMsg}</p>}
       {starterMsg && <p role="status" className="rounded-xl bg-emerald-50 dark:bg-emerald-900/40 p-3 text-sm font-medium text-emerald-900 dark:text-emerald-100">{starterMsg}</p>}
@@ -98,31 +101,41 @@ export default function Products() {
       ) : (
         <ul className="space-y-3">
           {sortedProducts.map((p) => (
-            <li key={p.id} className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
+            <li key={p.id} className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3 sm:p-4">
               <div className="flex items-start justify-between gap-2">
-                <div>
-                  <p className="font-bold">{p.name} {!p.isActive && <span className="ml-1 rounded-full bg-slate-200 dark:bg-slate-700 px-2 py-0.5 text-xs font-semibold text-slate-700 dark:text-slate-200">Inactive</span>}</p>
+                <div className="min-w-0 flex-1">
+                  <p className="break-words font-bold">{p.name} {!p.isActive && <span className="ml-1 rounded-full bg-slate-200 dark:bg-slate-700 px-2 py-0.5 text-xs font-semibold text-slate-700 dark:text-slate-200">Inactive</span>}</p>
                   <p className="text-sm text-slate-500 dark:text-slate-400">{p.unit} · GST {p.defaultTaxRate}%{p.hsnSacCode ? ` · HSN/SAC ${p.hsnSacCode}` : ''}</p>
                   {p.description && <p className="text-sm text-slate-600 dark:text-slate-400">{p.description}</p>}
                 </div>
-                <p className="font-bold">{inr(p.sellingPrice)}</p>
+                <p className="shrink-0 whitespace-nowrap font-bold">{inr(p.sellingPrice)}</p>
               </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button type="button" className={btnSecondary} onClick={() => openEdit(p)}><Icon name="pencil" /> Edit</button>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <button type="button" className={productActionCls} onClick={() => openEdit(p)}><Icon name="pencil" size={17} /> Edit</button>
                 <button
-                  type="button" className={btnSecondary}
+                  type="button" className={`${productActionCls} disabled:opacity-50`}
                   onClick={() => upsertProduct({ ...p, isActive: !p.isActive, updatedAt: nowISO() })}
                   disabled={!p.isActive ? atLimit : false}
                 >
-                  <><Icon name={p.isActive ? 'pause' : 'play'} /> {p.isActive ? 'Deactivate' : 'Activate'}</>
+                  <><Icon name={p.isActive ? 'pause' : 'play'} size={17} /> {p.isActive ? 'Deactivate' : 'Activate'}</>
                 </button>
                 {!referenced(p.id) && (
-                  <button type="button" className="min-h-[44px] rounded-xl border border-red-200 dark:border-red-800 bg-white dark:bg-slate-900 px-4 py-3 font-semibold text-red-700 dark:text-red-300" onClick={() => { if (window.confirm(`Delete "${p.name}"? This cannot be undone.`)) deleteProduct(p.id); }}>
-                    <Icon name="trash" /> Delete
-                  </button>
+                  <details className="relative ml-auto">
+                    <summary className={`${productActionCls} cursor-pointer list-none`} aria-label={`More actions for ${p.name}`}>
+                      <span aria-hidden="true">⋯</span> More
+                    </summary>
+                    <div className="absolute right-0 top-full z-10 mt-1 min-w-[160px] rounded-xl border border-slate-200 bg-[var(--surface)] p-1 shadow-lg">
+                      <button type="button" className="inline-flex min-h-[44px] w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-red-700 dark:text-red-300" onClick={(e) => {
+                        e.currentTarget.closest('details')?.removeAttribute('open');
+                        if (window.confirm(`Delete "${p.name}"? This cannot be undone.`)) void deleteProduct(p.id);
+                      }}>
+                        <Icon name="trash" size={17} /> Delete
+                      </button>
+                    </div>
+                  </details>
                 )}
-                {referenced(p.id) && <span className="self-center text-xs text-slate-500 dark:text-slate-400">Used in an invoice — deactivate instead of deleting.</span>}
               </div>
+              {referenced(p.id) && <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Used in an invoice — deactivate instead of deleting.</p>}
             </li>
           ))}
         </ul>
