@@ -3,6 +3,9 @@ import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
+  // Billora is served from the root of invitedigital.online, not a
+  // repository subpath. Keep generated manifest, icon, and Workbox URLs root-relative.
+  base: '/',
   plugins: [
     react(),
     VitePWA({
