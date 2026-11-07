@@ -1,0 +1,58 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+:root { color-scheme: light; --bg: #fff; --surface: #fff; --ink: #0b0b0c; --muted: #86868b; --fill: #f5f5f7; --fill-strong: #e8e8ed; --line: rgba(0, 0, 0, .08); --accent: #0b0b0c; --accent-strong: #303033; --danger: #d0473e; --radius-md: 9px; --radius-full: 999px; --ease-ios: cubic-bezier(.32, .72, 0, 1); --transition-fast: 160ms; --shadow-subtle: 0 1px 2px rgba(0,0,0,.04), 0 8px 24px rgba(0,0,0,.06); }
+.dark { color-scheme: dark; --bg: #111112; --surface: #1b1b1d; --ink: #f5f5f7; --muted: #a1a1a6; --fill: #27272a; --fill-strong: #36363a; --line: rgba(255,255,255,.12); --accent: #f5f5f7; --accent-strong: #d6d6da; --danger: #f07167; }
+body { min-width: 320px; background: var(--fill); color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", Inter, sans-serif; letter-spacing: -.012em; text-rendering: optimizeLegibility; }
+input, select, textarea { font-size: 16px; }
+button, input, select, textarea { -webkit-tap-highlight-color: transparent; }
+button, a, input, select, textarea { transition: color var(--transition-fast) var(--ease-ios), background-color var(--transition-fast) var(--ease-ios), border-color var(--transition-fast) var(--ease-ios), box-shadow var(--transition-fast) var(--ease-ios), transform var(--transition-fast) var(--ease-ios); }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 35%, transparent); outline-offset: 2px; }
+button:active:not(:disabled) { transform: scale(.985); }
+
+/* These overrides sit after Tailwind: presentation changes, no markup/data contract changes. */
+#root > div { background: var(--surface) !important; border-color: var(--line) !important; box-shadow: var(--shadow-subtle); }
+#root main { padding-inline: clamp(1.25rem, 3vw, 2rem) !important; padding-top: clamp(1.5rem, 4vw, 2.75rem) !important; }
+h1, h2, h3 { color: var(--ink); letter-spacing: -.035em; }
+h1 { font-weight: 650; }
+#root .rounded-2xl.border:not([role="alert"]):not([role="status"]), #root form.rounded-2xl { border-color: var(--line) !important; background: var(--surface) !important; box-shadow: none; }
+#root .border-slate-200, #root .border-slate-300 { border-color: var(--line) !important; }
+#root .bg-slate-100, #root .bg-slate-50 { background-color: var(--fill) !important; }
+#root .text-slate-500, #root .text-slate-600 { color: var(--muted) !important; }
+.sb-input { min-height: 46px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--fill); color: var(--ink); box-shadow: inset 0 1px 0 rgba(255,255,255,.45); }
+.sb-input:hover { border-color: color-mix(in srgb, var(--ink) 18%, transparent); }
+.sb-input:focus { border-color: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 14%, transparent); outline: 0; }
+.sb-btn-primary, .sb-btn-secondary, .sb-btn-danger { min-height: 44px; border-radius: var(--radius-full); font-size: .875rem; font-weight: 600; letter-spacing: -.01em; }
+.sb-btn-primary { background: var(--accent); box-shadow: 0 2px 5px color-mix(in srgb, var(--accent) 22%, transparent); }
+.sb-btn-primary:hover { background: var(--accent-strong); box-shadow: 0 5px 13px color-mix(in srgb, var(--accent) 25%, transparent); }
+.sb-btn-secondary { border-color: var(--line); background: var(--fill); color: var(--ink); }
+.sb-btn-secondary:hover { background: var(--fill-strong); }
+.sb-btn-danger { background: var(--danger); }
+.sb-sheet-backdrop { background: rgba(11,11,12,.38); backdrop-filter: blur(5px); }
+.sb-sheet { border: 1px solid var(--line); background: var(--surface); box-shadow: 0 -16px 48px rgba(0,0,0,.16); }
+.sb-nav { border-color: var(--line); background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(20px) saturate(1.35); box-shadow: 0 -1px 0 var(--line); }
+/* Page-level rhythm shared by the existing screen inventory. */
+#root main > .space-y-4 > header, #root main > .space-y-5 > header { margin-bottom: 1.5rem; }
+#root main h1 { font-size: clamp(1.875rem, 4vw, 3rem); line-height: 1.05; }
+#root main h2 { font-size: 1.125rem; font-weight: 650; }
+#root main label > span:first-child:not(.sr-only) { color: var(--muted); font-size: .75rem; font-weight: 650; letter-spacing: .01em; }
+#root main input:not([type="checkbox"]), #root main select, #root main textarea { border-color: var(--line) !important; background: var(--fill) !important; color: var(--ink) !important; border-radius: var(--radius-md) !important; }
+#root main .rounded-xl.border, #root main .rounded-2xl.border { border-color: var(--line) !important; }
+#root main .bg-teal-50 { background: color-mix(in srgb, var(--accent) 7%, var(--surface)) !important; }
+#root .bg-teal-700 { background-color: var(--accent) !important; }
+#root .text-teal-700, #root .text-teal-800, #root .text-teal-900 { color: var(--ink) !important; }
+#root .border-teal-200, #root .border-teal-700, #root .border-teal-800 { border-color: var(--line) !important; }
+#root .divide-teal-100 > * + *, #root .divide-teal-800 > * + * { border-color: var(--line) !important; }
+.dark #root .text-teal-300, .dark #root .text-teal-100 { color: var(--ink) !important; }
+.dark #root .bg-teal-900\/40 { background-color: color-mix(in srgb, var(--ink) 9%, transparent) !important; }
+#root main .bg-amber-50 { background: #fff8e9 !important; }
+#root main .rounded-full.border { border-color: var(--line) !important; }
+#root main table { font-variant-numeric: tabular-nums; }
+#root main table thead tr { background: var(--ink) !important; }
+#root main .overflow-x-auto { border-color: var(--line) !important; background: var(--surface); }
+#root main .divide-y > * + * { border-color: var(--line) !important; }
+@media (min-width: 640px) { #root > div { margin-block: 1.5rem; border-radius: 24px; overflow: clip; } }
+@media (min-width: 768px) { #root > div { max-width: 880px !important; } #root main { padding-bottom: 4rem !important; } .sb-nav { left: 1.5rem; right: auto; top: 50%; bottom: auto; width: 76px; transform: translateY(-50%); border: 1px solid var(--line); border-radius: 24px; box-shadow: var(--shadow-subtle); } .sb-nav > div { grid-template-columns: 1fr !important; padding: .4rem; } .sb-nav button { border-radius: 18px; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; } }
