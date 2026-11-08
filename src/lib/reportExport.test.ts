@@ -2,6 +2,32 @@ import { describe, expect, it } from 'vitest';
 import * as XLSX from 'xlsx';
 import { buildReportPdfBlob, buildXlsxWorkbook, escapeCsvCell, reportFilename, toCsv } from './reportExport';
 
+describe('printed report completeness', () => {
+  it('includes the same net totals summary even when no rows match', async () => {
+    const blob = buildReportPdfBlob({ businessName: 'Sample Business', reportTitle: 'Item-wise Report', filtersDescription: 'Type: Without Tax', headers: ['Item', 'Total'], rows: [], summaryRows: [['Invoices', '0'], ['Additional Charges', 0], ['Grand Total', 0]] });
+    const text = new TextDecoder('latin1').decode(await blob.arrayBuffer());
+    expect(text).toContain('Net totals for the selected filters');
+    expect(text).toContain('Additional Charges');
+    expect(text).toContain('Grand Total');
+    expect(text).toContain('No invoices match');
+  });
+
+  it('keeps a large grand total in one numeric cell instead of splitting its digits', async () => {
+    const headers = ['Invoice No', 'Date', 'Type', 'Status', 'Customer', 'Subtotal', 'Discount', 'Taxable', 'CGST', 'SGST', 'IGST', 'GST', 'Add. Label', 'Add. Amt', 'Grand Total'];
+    const blob = buildReportPdfBlob({ businessName: 'Sample', reportTitle: 'Invoice Summary', filtersDescription: 'All dates', headers, colWidths: [24,20,18,16,32,19,17,19,15,15,15,15,17,17,18], rows: [['INV-2026-0001', '', 'Bill', 'FINAL', 'Customer', 1347300, 1800, 1345500, 0, 0, 0, 0, 'Delivery', 1000, 1467595]], totalsRow: ['', '', '', '', 'TOTAL', 1347300, 1800, 1345500, 0, 0, 0, 0, '', 1000, 1467595] });
+    const text = new TextDecoder('latin1').decode(await blob.arrayBuffer());
+    expect(text).toContain('(14,67,595.00) Tj');
+  });
+
+  it('continues an oversized text cell across pages without clipping it', async () => {
+    const blob = buildReportPdfBlob({ businessName: 'Sample', reportTitle: 'Item-wise Report', filtersDescription: 'All dates', headers: ['Item', 'Total'], rows: [[Array.from({length: 100}, (_,i) => `Item description ${i + 1}`).join('\n'), 118]] });
+    const text = new TextDecoder('latin1').decode(await blob.arrayBuffer());
+    expect(text).toContain('Item description 100');
+    const ys = [...text.matchAll(/[-\d.]+ ([-\d.]+) Td/g)].map(m => Number(m[1]));
+    expect(Math.min(...ys)).toBeGreaterThan(15);
+  });
+});
+
 describe('CSV', () => {
   it('escapes commas, quotes and newlines, and prefixes a BOM', () => {
     expect(escapeCsvCell('Acme, "Quoted"\nTraders')).toBe('"Acme, ""Quoted""\nTraders"');

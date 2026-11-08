@@ -4,6 +4,7 @@ import { inrPlain } from './format';
 import { fmtDate } from './format';
 import { amountInWords } from './words';
 import { isSystemNote } from './systemNote';
+import { PRINT_INK } from './printStyles';
 
 /**
  * A4 invoice PDF via jsPDF. Tax wording/columns appear ONLY for TAX
@@ -36,34 +37,44 @@ export function buildInvoicePdf(invoice: Invoice): Blob {
   // by the wrapped line count. The old code drew each block with one
   // doc.text() and a fixed y += 4.5, so a long address, phone and GSTIN
   // printed on top of each other. A page break is taken before a block
-  // that would run past the bottom of the page.
+  // whenever the next line would run past the bottom of the page.
   const ensurePage = (needed: number) => {
     if (y + needed > 265) { doc.addPage(); y = 16; }
   };
-  const wrappedLines = (text: string): string[] => {
+  const wrappedLines = (text: string, width = maxW): string[] => {
     const out: string[] = [];
     for (const raw of text.split('\n')) {
-      const parts = doc.splitTextToSize(raw, maxW);
+      const parts = doc.splitTextToSize(raw, width);
       // splitTextToSize returns [''] for an empty line; keep one blank line.
       out.push(...(parts.length ? parts : ['']));
     }
     return out;
   };
-  const writeWrapped = (text: string, lineHeight = 4.5) => {
-    const lines = wrappedLines(text);
-    ensurePage(lines.length * lineHeight);
-    for (const l of lines) { doc.text(l, M, y); y += lineHeight; }
+  const writeWrapped = (text: string, lineHeight = 4.5, width = maxW) => {
+    for (const l of wrappedLines(text, width)) {
+      ensurePage(lineHeight);
+      doc.text(l, M, y); y += lineHeight;
+    }
   };
-  const writeBlock = (texts: string[], lineHeight = 4.5) => {
+  const writeBlock = (texts: string[], lineHeight = 4.5, width = maxW) => {
     for (const t of texts) {
-      if (t) writeWrapped(t, lineHeight);
+      if (t) writeWrapped(t, lineHeight, width);
     }
   };
 
   // Header
+  let headerWidth = maxW;
+  if (b.logo) {
+    try {
+      const image = doc.getImageProperties(b.logo);
+      const scale = Math.min(28 / image.width, 20 / image.height);
+      doc.addImage(b.logo, image.fileType, right - image.width * scale, y - 3, image.width * scale, image.height * scale);
+      headerWidth -= 34;
+    } catch { /* An unsupported decorative logo must not prevent invoice printing. */ }
+  }
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(18);
-  writeWrapped(b.businessName || 'Simple Bill', 7);
+  writeWrapped(b.businessName || 'Simple Bill', 7, headerWidth);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
   const headerLines: string[] = [];
@@ -73,9 +84,9 @@ export function buildInvoicePdf(invoice: Invoice): Blob {
   const contact = [bPhone ? `Ph: ${bPhone}` : '', b.email].filter(Boolean).join('  |  ');
   if (contact) headerLines.push(contact);
   if (isTax && b.gstin) headerLines.push(`GSTIN: ${b.gstin}`);
-  writeBlock(headerLines);
+  writeBlock(headerLines, 4.5, headerWidth);
   y += 2;
-  doc.setDrawColor(15, 118, 110);
+  doc.setDrawColor(...PRINT_INK);
   doc.setLineWidth(0.8);
   doc.line(M, y, right, y);
   y += 8;
@@ -85,11 +96,10 @@ export function buildInvoicePdf(invoice: Invoice): Blob {
   doc.text(isTax ? 'TAX INVOICE' : 'BILL', M, y);
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
-  doc.text(`No: ${invoice.invoiceNumber}`, right, y, { align: 'right' });
-  y += 5;
-  doc.text(`Date: ${fmtDate(invoice.issueDate)}`, right, y, { align: 'right' });
-  if (invoice.dueDate) { y += 5; doc.text(`Due: ${fmtDate(invoice.dueDate)}`, right, y, { align: 'right' }); }
-  y += 8;
+  doc.text(`Status: ${invoice.status}`, right, y, { align: 'right' });
+  y += 6;
+  writeBlock([`Invoice No: ${invoice.invoiceNumber}`, `Date: ${fmtDate(invoice.issueDate)}`, invoice.dueDate ? `Due: ${fmtDate(invoice.dueDate)}` : '']);
+  y += 4;
 
   // Customer block
   doc.setFont('helvetica', 'bold');
@@ -137,8 +147,16 @@ export function buildInvoicePdf(invoice: Invoice): Blob {
   const QTY_X = 92;
   const TAX_RIGHTS = { rate: 132, total: 154, tax: 176, net: 196 };
   const NOTAX_RIGHTS = { rate: 132, total: 164, net: 196 };
+  const numberCell = (text: string, edge: number, width: number, size = 9) => {
+    doc.setFontSize(size);
+    const textWidth = doc.getTextWidth(text);
+    doc.setFontSize(Math.min(size, size * (width - 2) / Math.max(textWidth, 1)));
+    doc.text(text, edge, y, { align: 'right' });
+    doc.setFontSize(size);
+  };
   const drawHeader = () => {
-    doc.setFillColor(15, 118, 110);
+    ensurePage(12);
+    doc.setFillColor(...PRINT_INK);
     doc.rect(M, y - 4, right - M, 7, 'F');
     doc.setTextColor(255, 255, 255);
     doc.setFont('helvetica', 'bold');
@@ -168,33 +186,39 @@ export function buildInvoicePdf(invoice: Invoice): Blob {
     // content: omit them here so already-saved invoices with the old
     // note also print cleanly. Genuine descriptions still print.
     const desc = item.description && !isSystemNote(item.description) ? item.description : '';
-    const name = desc ? `${item.productName} — ${desc}` : item.productName;
-    const wrapped = doc.splitTextToSize(name, ITEM_W - 2);
-    const rowH = Math.max(6, wrapped.length * 4.5);
+    const name = desc ? `${item.productName} - ${desc}` : item.productName;
+    const wrapped: string[] = doc.splitTextToSize(name, ITEM_W - 2);
+    if (isTax) wrapped.push(...doc.splitTextToSize([item.hsnSacCode ? `HSN/SAC: ${item.hsnSacCode}` : '', `GST: ${item.taxRate}%`].filter(Boolean).join(' | '), ITEM_W - 2));
+    const quantity: string[] = doc.splitTextToSize(`${item.quantity} ${item.unit}`, 16);
+    const lineCount = Math.max(wrapped.length, quantity.length);
+    const rowH = Math.max(6, lineCount * 4.5);
     const extraH = item.lineDiscount > 0 ? 4.5 : 0;
-    // Reserve the whole row (plus its discount line, if any) before
-    // drawing, so neither the wrapped name nor the discount line can
-    // run into the next row or off the bottom of the page.
-    if (y + rowH + extraH > 265) { doc.addPage(); y = 16; drawHeader(); }
-    doc.text(String(i + 1), M + 1, y);
-    doc.text(wrapped, ITEM_X, y);
-    const qtyTxt = `${item.quantity} ${item.unit}`;
-    doc.text(qtyTxt, QTY_X, y);
-    if (isTax) {
-      doc.text(inrPlain(item.unitPrice), TAX_RIGHTS.rate, y, { align: 'right' });
-      doc.text(inrPlain(item.lineSubtotal), TAX_RIGHTS.total, y, { align: 'right' });
-      doc.text(inrPlain(item.lineTax), TAX_RIGHTS.tax, y, { align: 'right' });
-    } else {
-      doc.text(inrPlain(item.unitPrice), NOTAX_RIGHTS.rate, y, { align: 'right' });
-      doc.text(inrPlain(item.lineSubtotal), NOTAX_RIGHTS.total, y, { align: 'right' });
+    // Keep ordinary rows whole, but continue exceptionally long descriptions
+    // across pages. Monetary values print exactly once, in the first segment.
+    if (y + rowH + extraH > 265 && rowH + extraH < 241) { doc.addPage(); y = 16; drawHeader(); }
+    let offset = 0;
+    while (offset < lineCount) {
+      if (y + 4.5 > 265) { doc.addPage(); y = 16; drawHeader(); }
+      const count = Math.min(lineCount - offset, Math.max(1, Math.floor((265 - y) / 4.5)));
+      doc.text(String(i + 1), M + 1, y);
+      wrapped.slice(offset, offset + count).forEach((text, n) => doc.text(text, ITEM_X, y + n * 4.5));
+      quantity.slice(offset, offset + count).forEach((text, n) => doc.text(text, QTY_X, y + n * 4.5));
+      if (offset === 0) {
+        const edges = isTax ? TAX_RIGHTS : NOTAX_RIGHTS;
+        numberCell(inrPlain(item.unitPrice), edges.rate, 22);
+        numberCell(inrPlain(item.lineSubtotal), edges.total, isTax ? 22 : 32);
+        if (isTax) numberCell(inrPlain(item.lineTax), TAX_RIGHTS.tax, 22);
+        numberCell(inrPlain(item.lineTotal), right, isTax ? 20 : 32);
+      }
+      y += Math.max(6, count * 4.5);
+      offset += count;
     }
-    doc.text(inrPlain(item.lineTotal), right, y, { align: 'right' });
-    y += rowH;
     if (item.lineDiscount > 0) {
       // Drawn on its own line BELOW the row (y has already advanced past
       // the wrapped name) and y advances again, so it can never overlap
       // the next row. The old code drew it at y - 1 without advancing y,
       // which put it 1mm above the next row's baseline.
+      if (y + extraH > 265) { doc.addPage(); y = 16; drawHeader(); }
       doc.setFontSize(8);
       doc.setTextColor(100, 100, 100);
       doc.text(`Discount: ${inrPlain(item.lineDiscount)}`, ITEM_X, y);
@@ -215,26 +239,30 @@ export function buildInvoicePdf(invoice: Invoice): Blob {
     doc.text('HSN-wise Tax Summary', M, y);
     y += 6;
     const kind = invoice.taxBreakdown.kind;
-    doc.setFillColor(15, 118, 110);
-    doc.rect(M, y - 4, right - M, 7, 'F');
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(8.5);
-    doc.text('HSN/SAC', M + 1, y + 1);
-    doc.text('Taxable Value', 118, y + 1, { align: 'right' });
-    if (kind === 'CGST_SGST') {
-      doc.text('CGST', 152, y + 1, { align: 'right' });
-      doc.text('SGST', right, y + 1, { align: 'right' });
-    } else if (kind === 'IGST') {
-      doc.text('IGST', right, y + 1, { align: 'right' });
-    } else {
-      doc.text('GST', right, y + 1, { align: 'right' });
-    }
-    doc.setTextColor(0, 0, 0);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
-    y += 8;
+    const drawHsnHeader = () => {
+      doc.setFont('helvetica', 'bold');
+      doc.setFillColor(...PRINT_INK);
+      doc.rect(M, y - 4, right - M, 7, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(8.5);
+      doc.text('HSN/SAC', M + 1, y + 1);
+      doc.text('Taxable Value', 118, y + 1, { align: 'right' });
+      if (kind === 'CGST_SGST') {
+        doc.text('CGST', 152, y + 1, { align: 'right' });
+        doc.text('SGST', right, y + 1, { align: 'right' });
+      } else if (kind === 'IGST') {
+        doc.text('IGST', right, y + 1, { align: 'right' });
+      } else {
+        doc.text('GST', right, y + 1, { align: 'right' });
+      }
+      doc.setTextColor(0, 0, 0);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      y += 8;
+    };
+    drawHsnHeader();
     for (const row of hsnRows) {
-      if (y > 265) { doc.addPage(); y = 16; }
+      if (y + 5.5 > 265) { doc.addPage(); y = 16; drawHsnHeader(); }
       doc.text(row.hsn, M + 1, y);
       doc.text(inrPlain(row.taxable), 118, y, { align: 'right' });
       if (kind === 'CGST_SGST') {
@@ -250,7 +278,7 @@ export function buildInvoicePdf(invoice: Invoice): Blob {
     y += 2;
   }
   y += 2;
-  ensurePage(30);
+  ensurePage(65);
   doc.setDrawColor(200, 200, 200);
   doc.line(M, y, right, y);
   y += 7;
@@ -259,9 +287,14 @@ export function buildInvoicePdf(invoice: Invoice): Blob {
   doc.setFontSize(9);
   const totalRow = (label: string, value: string, bold = false) => {
     doc.setFont('helvetica', bold ? 'bold' : 'normal');
-    doc.text(label, right - 70, y);
-    doc.text(value, right, y, { align: 'right' });
-    y += 5.5;
+    const size = doc.getFontSize();
+    const labelLines: string[] = doc.splitTextToSize(label, 58);
+    labelLines.forEach((text, i) => {
+      ensurePage(5.5);
+      doc.text(text, right - 90, y);
+      if (i === 0) numberCell(value, right, 30, size);
+      y += 5.5;
+    });
   };
   totalRow('Subtotal', inrPlain(invoice.subtotal));
   if (invoice.discountAmount > 0) totalRow('Discount', `- ${inrPlain(invoice.discountAmount)}`);
@@ -279,7 +312,7 @@ export function buildInvoicePdf(invoice: Invoice): Blob {
   }
   const charge = invoice.additionalChargeAmount ?? 0;
   if (charge > 0) totalRow(invoice.additionalChargeLabel?.trim() || 'Additional charge', inrPlain(charge));
-  doc.setDrawColor(15, 118, 110);
+  doc.setDrawColor(...PRINT_INK);
   doc.setLineWidth(0.6);
   doc.line(right - 70, y, right, y);
   y += 6;
@@ -306,25 +339,26 @@ export function buildInvoicePdf(invoice: Invoice): Blob {
     y += 3;
   }
   const payLines = [
-    b.bankName ? `Bank: ${b.bankName}` : '',
-    b.accountHolderName ? `Account Holder: ${b.accountHolderName}` : '',
-    b.accountNumber ? `Account No: ${b.accountNumber}` : '',
-    b.ifsc ? `IFSC: ${b.ifsc}` : '',
+    [b.bankName ? `Bank: ${b.bankName}` : '', b.accountHolderName ? `Account Holder: ${b.accountHolderName}` : ''].filter(Boolean).join(' | '),
+    [b.accountNumber ? `Account No: ${b.accountNumber}` : '', b.ifsc ? `IFSC: ${b.ifsc}` : ''].filter(Boolean).join(' | '),
     b.upiId ? `UPI: ${b.upiId}` : '',
   ].filter(Boolean);
   if (payLines.length) {
-    ensurePage(10);
+    // Keep ordinary payment details together; very long custom values can
+    // still continue through writeWrapped rather than overflowing a page.
+    ensurePage(Math.min(249, 5 + payLines.reduce((height, text) => height + wrappedLines(text).length * 4.5, 0)));
     doc.setFont('helvetica', 'bold'); doc.text('Payment Details', M, y); y += 5;
     doc.setFont('helvetica', 'normal');
     writeBlock(payLines);
   }
-  if (y > 270) { doc.addPage(); y = 16; }
-  y = Math.max(y + 6, 280);
-  doc.setFontSize(8);
-  doc.setTextColor(100, 100, 100);
-  doc.text(isTax
-    ? 'This is a system-generated invoice. It is an invoice record, not a GST filing document.'
-    : 'This is a system-generated bill record.', M, y);
+  const pages = doc.getNumberOfPages();
+  for (let page = 1; page <= pages; page++) {
+    doc.setPage(page);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(7);
+    doc.setTextColor(100, 100, 100);
+    doc.text(isTax ? 'System-generated invoice record. Not a GST filing document.' : 'System-generated bill record.', M, 281);
+    doc.text(`Page ${page} of ${pages}`, right, 281, { align: 'right' });
+  }
 
   return doc.output('blob');
 }
@@ -354,7 +388,7 @@ export function hsnTaxSummary(invoice: Invoice): HsnTaxRow[] {
   const groups = new Map<string, { taxable: number; tax: number }>();
   for (const item of invoice.lineItems) {
     const hsn = (item.hsnSacCode || '').trim();
-    if (!hsn) continue;
+    // Unknown HSNs participate in allocation but do not print as known codes.
     const g = groups.get(hsn) ?? { taxable: 0, tax: 0 };
     g.taxable = Math.round((g.taxable + item.lineTaxable) * 100) / 100;
     g.tax = Math.round((g.tax + item.lineTax) * 100) / 100;
@@ -383,7 +417,7 @@ export function hsnTaxSummary(invoice: Invoice): HsnTaxRow[] {
     } else if (kind === 'GST') {
       gst = g.tax;
     }
-    rows.push({ hsn, taxable: g.taxable, cgst, sgst, igst, gst });
+    if (hsn) rows.push({ hsn, taxable: g.taxable, cgst, sgst, igst, gst });
   });
   return rows;
 }

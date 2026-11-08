@@ -72,6 +72,11 @@ describe('summaryRows', () => {
 });
 
 describe('itemRows', () => {
+  it('does not export stale tax values from a bill without tax', () => {
+    const row = itemRows([inv({ invoiceType: 'NON_TAX' })])[0];
+    expect(row[11]).toBe(0);
+    expect(row[12]).toBe(0);
+  });
   it('emits one row per line, invoice order then line order', () => {
     const a = inv({
       invoiceNumber: 'INV-2026-0002', issueDate: '2026-10-20',
@@ -85,6 +90,10 @@ describe('itemRows', () => {
 });
 
 describe('hsnRows', () => {
+  it('excludes unknown-HSN tax instead of allocating it to a known HSN', () => {
+    const rows = hsnRows([inv({ lineItems: [line({hsnSacCode: '6810'}), line({id: 'l2', productId: '', hsnSacCode: '', lineTaxable: 200, lineTax: 36})], taxBreakdown: {kind: 'CGST_SGST', cgst: 27, sgst: 27, igst: 0, gst: 0} })]);
+    expect(rows).toEqual([{hsn: '6810', rate: 18, taxable: 100, cgst: 9, sgst: 9, igst: 0, gst: 0, totalTax: 18}]);
+  });
   it('aggregates across two CGST_SGST invoices with exact column totals', () => {
     const mk = (hsn: string, taxable: number, tax: number, cgst: number, sgst: number): Invoice => inv({
       lineItems: [line({ hsnSacCode: hsn, lineTaxable: taxable, lineTax: tax })],

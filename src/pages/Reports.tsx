@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useStore } from '../lib/store';
-import { inr } from '../lib/format';
+import { inr, inrPlain } from '../lib/format';
 import { btnPrimary, btnSecondary, Field, inputCls } from '../components/ui';
 import { Icon } from '../components/Icon';
 import {
@@ -13,6 +13,7 @@ import {
   type ReportRow,
 } from '../lib/reportExport';
 import { downloadBlob } from '../lib/pdf';
+import { openPdfForPrint } from '../lib/printPdf';
 
 type ReportKind = 'summary' | 'items' | 'hsn';
 
@@ -30,6 +31,7 @@ export default function Reports() {
   const [to, setTo] = useState('');
   const [kind, setKind] = useState<ReportKind>('summary');
   const [msg, setMsg] = useState('');
+  const [err, setErr] = useState('');
   const [showUnsupportedShare, setShowUnsupportedShare] = useState(false);
   // Native file sharing needs a secure context (HTTPS or localhost) —
   // same rule as invoice PDFs, so warn before tapping on plain HTTP.
@@ -66,8 +68,8 @@ export default function Reports() {
         headers: ITEM_HEADERS,
         rows,
         totalsRow: ['', '', '', '', 'TOTAL', '', '', '', '', sumCol(9), sumCol(10), '', sumCol(12), sumCol(13)],
-        pdfHeaders: ITEM_HEADERS,
-        colWidths: [24, 20, 32, 16, 38, 14, 12, 12, 16, 16, 19, 13, 16, 19],
+        pdfHeaders: ['Invoice No', 'Date', 'Customer', 'Status', 'Item', 'HSN/SAC', 'Unit', 'Qty', 'Rate', 'Discount', 'Taxable', 'Tax %', 'Tax Amount', 'Line Total'],
+        colWidths: [24, 20, 32, 16, 36, 16, 12, 12, 16, 16, 19, 13, 16, 19],
       };
     }
     const hsn = hsnRows(filtered, products);
@@ -116,14 +118,25 @@ export default function Reports() {
     setMsg(`XLSX exported: Summary sheet + ${meta.sheet} sheet (${rows.length} row(s)).`);
   };
   const exportPdf = () => {
-    downloadBlob(
-      buildReportPdfBlob({
-        businessName: profile.businessName, reportTitle: meta.title, filtersDescription,
-        headers, pdfHeaders, colWidths, rows, totalsRow: rows.length ? totalsRow : undefined,
-      }),
-      reportFilename(meta.slug, 'pdf', filters),
-    );
-    setMsg(`PDF exported: ${meta.label} (${rows.length} row(s)).`);
+    try {
+      downloadBlob(buildPdf(), reportFilename(meta.slug, 'pdf', filters));
+      setErr(''); setMsg(`PDF exported: ${meta.label} (${rows.length} row(s)).`);
+    } catch { setMsg(''); setErr('Could not export the report PDF. Please try again.'); }
+  };
+  const buildPdf = () => buildReportPdfBlob({
+    businessName: profile.businessName, reportTitle: meta.title, filtersDescription,
+    headers, pdfHeaders, colWidths, rows, totalsRow: rows.length ? totalsRow : undefined,
+    summaryRows: summarySheetRows.map(([label, value], i) => [label, i < 6 ? String(value) : inrPlain(Number(value))]),
+  });
+  const printPdf = () => {
+    setMsg(''); setErr('');
+    try {
+      const result = openPdfForPrint(buildPdf());
+      if (result === 'opened') setMsg('PDF opened in a new tab. Use the PDF viewer’s Print option.');
+      else setErr(result === 'blocked'
+        ? 'Your browser blocked the PDF tab. Allow pop-ups for this app, or use Export PDF and print the saved file.'
+        : 'This browser cannot display PDFs. Use Export PDF, then open the saved file in a PDF app to print it.');
+    } catch { setErr('Could not open the report PDF. Try Export PDF, then print the saved file.'); }
   };
 
   // Share buttons: same files as Export, via the native share sheet
@@ -133,6 +146,7 @@ export default function Reports() {
   const shareBlob = async (blob: Blob, filename: string, mimeType: string, label: string) => {
     try {
       const r = await shareFile(blob, filename, mimeType);
+      setErr('');
       if (r === 'shared') { setShowUnsupportedShare(false); setMsg('Share sheet opened.'); }
       else if (r === 'cancelled') { setShowUnsupportedShare(false); setMsg('Sharing cancelled — nothing was downloaded.'); }
       else {
@@ -141,7 +155,7 @@ export default function Reports() {
         setShowUnsupportedShare(true);
       }
     } catch {
-      setMsg(`Could not share the ${label} file. Please try again.`);
+      setMsg(''); setErr(`Could not share the ${label} file. Please try again.`);
     }
   };
   const shareCsv = () => void shareBlob(buildCsvBlob(headers, rows), reportFilename(meta.slug, 'csv', filters), 'text/csv', 'CSV');
@@ -149,12 +163,10 @@ export default function Reports() {
     buildXlsxBlob({ sheetName: meta.sheet, headers, rows, summaryRows: summarySheetRows, filtersDescription }),
     reportFilename(meta.slug, 'xlsx', filters),
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'XLSX');
-  const sharePdf = () => void shareBlob(
-    buildReportPdfBlob({
-      businessName: profile.businessName, reportTitle: meta.title, filtersDescription,
-      headers, pdfHeaders, colWidths, rows, totalsRow: rows.length ? totalsRow : undefined,
-    }),
-    reportFilename(meta.slug, 'pdf', filters), 'application/pdf', 'PDF');
+  const sharePdf = () => {
+    try { void shareBlob(buildPdf(), reportFilename(meta.slug, 'pdf', filters), 'application/pdf', 'PDF'); }
+    catch { setMsg(''); setErr('Could not generate the report PDF. Please try again.'); }
+  };
 
   const clearFilters = () => { setType('ALL'); setStatus('ALL'); setFrom(''); setTo(''); };
 
@@ -170,6 +182,7 @@ export default function Reports() {
   return (
     <div className="space-y-4">
       <h1 className="flex items-center gap-2 text-2xl font-bold"><Icon name="chart" size={24} /> Reports</h1>
+      {err && <p role="alert" className="rounded-xl bg-red-50 dark:bg-red-900/40 p-3 text-sm font-medium text-red-800 dark:text-red-100">{err}</p>}
       <p className="text-sm text-slate-600 dark:text-slate-400">
         Export invoice details for the auditing team. Exports use the invoice snapshots, so later edits to products or customers never change an exported report.
       </p>
@@ -239,6 +252,7 @@ export default function Reports() {
         <button type="button" className={btnPrimary} onClick={exportCsv}><Icon name="download" /> Export CSV</button>
         <button type="button" className={btnPrimary} onClick={exportXlsx}><Icon name="download" /> Export XLSX</button>
         <button type="button" className={btnPrimary} onClick={exportPdf}><Icon name="download" /> Export PDF</button>
+        <button type="button" className={btnSecondary} onClick={printPdf}><Icon name="printer" /> Print PDF</button>
       </section>
       {/* Share — same files as Export, via the native share sheet */}
       <section aria-label={`Share ${meta.label}`} className="flex flex-wrap gap-2">

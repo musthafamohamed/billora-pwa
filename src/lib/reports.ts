@@ -92,8 +92,8 @@ export function itemRows(filtered: Invoice[]): ItemRow[] {
         line.unitPrice,
         line.lineDiscount,
         line.lineTaxable,
-        line.taxRate,
-        line.lineTax,
+        inv.invoiceType === 'TAX' ? line.taxRate : 0,
+        inv.invoiceType === 'TAX' ? line.lineTax : 0,
         line.lineTotal,
       ]);
     }
@@ -148,6 +148,7 @@ export function hsnRows(filtered: Invoice[], products: Pick<Product, 'id' | 'nam
 
   const byKey = new Map<string, HsnReportRow>();
   const add = (hsn: string, rate: number, taxable: number, cgst: number, sgst: number, igst: number, gst: number) => {
+    if (!hsn) return;
     const key = `${hsn}@@${rate}`;
     const cur = byKey.get(key) ?? { hsn, rate, taxable: 0, cgst: 0, sgst: 0, igst: 0, gst: 0, totalTax: 0 };
     cur.taxable = round2(cur.taxable + taxable);
@@ -165,7 +166,8 @@ export function hsnRows(filtered: Invoice[], products: Pick<Product, 'id' | 'nam
     const groups = new Map<string, { hsn: string; rate: number; taxable: number; tax: number }>();
     for (const line of inv.lineItems) {
       const hsn = enrichHsn(inv, line);
-      if (!hsn) continue;
+      // Include the unknown group during tax allocation, then omit it from
+      // output. Its tax must not be assigned to the final known HSN.
       const rate = inv.invoiceType === 'TAX' ? line.taxRate : 0;
       const key = `${hsn}@@${rate}`;
       const g = groups.get(key) ?? { hsn, rate, taxable: 0, tax: 0 };

@@ -27,6 +27,32 @@ function sample(type: 'TAX' | 'NON_TAX'): Invoice {
 }
 
 describe('PDF generation', () => {
+  it.each(['TAX', 'NON_TAX'] as const)('prints the stored document status on a %s document', async (type) => {
+    const inv = { ...sample(type), status: 'CANCELLED' as const };
+    const text = new TextDecoder('latin1').decode(await buildInvoicePdf(inv).arrayBuffer());
+    expect(text).toContain('Status: CANCELLED');
+  });
+
+  it('paginates notes longer than a page without drawing text below the printable area', async () => {
+    const inv = sample('TAX');
+    inv.notes = Array.from({ length: 100 }, (_, i) => `Delivery instruction ${i + 1}`).join('\n');
+    const text = new TextDecoder('latin1').decode(await buildInvoicePdf(inv).arrayBuffer());
+    expect(text).toContain('Delivery instruction 100');
+    const ys = [...text.matchAll(/[-\d.]+ ([-\d.]+) Td/g)].map(m => Number(m[1]));
+    expect(ys.length).toBeGreaterThan(100);
+    expect(Math.min(...ys)).toBeGreaterThan(35);
+    expect(text).toContain('Page 1 of');
+  });
+
+  it('does not attribute tax from an item without an HSN to the last known HSN', () => {
+    const inv = sample('TAX');
+    inv.lineItems = [
+      { ...inv.lineItems[0], id: 'known', hsnSacCode: '6810', lineTaxable: 100, lineTax: 18 },
+      { ...inv.lineItems[0], id: 'unknown', hsnSacCode: '', lineTaxable: 200, lineTax: 36 },
+    ];
+    inv.taxBreakdown = { kind: 'CGST_SGST', cgst: 27, sgst: 27, igst: 0, gst: 0 };
+    expect(hsnTaxSummary(inv)).toEqual([{ hsn: '6810', taxable: 100, cgst: 9, sgst: 9, igst: 0, gst: 0 }]);
+  });
   it('produces a non-empty PDF blob for a tax invoice', () => {
     const blob = buildInvoicePdf(sample('TAX'));
     expect(blob.size).toBeGreaterThan(1000);

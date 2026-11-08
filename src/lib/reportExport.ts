@@ -3,6 +3,7 @@ import * as XLSX from 'xlsx';
 import { inrPlain } from './format';
 import { todayISO } from './types';
 import type { ReportFilters } from './reports';
+import { PRINT_FILL, PRINT_INK } from './printStyles';
 
 export type ReportCell = string | number;
 export type ReportRow = ReportCell[];
@@ -89,8 +90,7 @@ export function buildXlsxWorkbook(args: {
  *   Charge Label" and "Additional Charge Amount" can never both
  *   collapse to "Additional". Callers may also pass shorter pdfHeaders
  *   (e.g. "Add. Label") — CSV/XLSX headers stay full.
- * - The totals row is separated from its rule by 5mm and gets a light
- *   teal background, so it is unmistakably its own row.
+ * - The totals row is separated from its rule and uses a neutral fill.
  */
 export function buildReportPdfBlob(args: {
   businessName: string;
@@ -103,6 +103,8 @@ export function buildReportPdfBlob(args: {
   colWidths?: readonly number[];
   rows: ReportRow[];
   totalsRow?: ReportRow; // aligned to headers; '' for non-total columns
+  /** Same filtered net totals as the screen/XLSX summary, including empty results. */
+  summaryRows?: ReportRow[];
 }): Blob {
   const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'landscape' });
   const W = 297;
@@ -124,19 +126,23 @@ export function buildReportPdfBlob(args: {
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(14);
-  doc.text(args.businessName || 'Simple Bill', M, y);
-  y += 7;
+  const writeHeading = (text: string, lineHeight: number) => {
+    for (const line of doc.splitTextToSize(text, usable)) {
+      if (y + lineHeight > H - 14) { doc.addPage(); y = 14; }
+      doc.text(line, M, y); y += lineHeight;
+    }
+  };
+  writeHeading(args.businessName || 'Simple Bill', 7);
   doc.setFontSize(11);
-  doc.text(args.reportTitle, M, y);
-  y += 6;
+  writeHeading(args.reportTitle, 6);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
   doc.setTextColor(80, 80, 80);
-  for (const line of doc.splitTextToSize(args.filtersDescription, usable)) { doc.text(line, M, y); y += 4; }
+  writeHeading(args.filtersDescription, 4);
   doc.text(`Generated: ${todayISO()}`, M, y);
   y += 4;
   doc.setTextColor(0, 0, 0);
-  doc.setDrawColor(15, 118, 110);
+  doc.setDrawColor(...PRINT_INK);
   doc.setLineWidth(0.6);
   doc.line(M, y, right, y);
   y += 6;
@@ -150,7 +156,7 @@ export function buildReportPdfBlob(args: {
     });
     const maxLines = Math.max(1, ...wrapped.map((w) => w.length));
     const headerH = maxLines * 4 + 3;
-    doc.setFillColor(15, 118, 110);
+    doc.setFillColor(...PRINT_INK);
     doc.rect(M, y - 4, usable, headerH, 'F');
     doc.setTextColor(255, 255, 255);
     wrapped.forEach((lines, i) => {
@@ -166,48 +172,85 @@ export function buildReportPdfBlob(args: {
     doc.setFontSize(8);
     const wrapped: string[][] = row.map((cell, i) => {
       const s = typeof cell === 'number' ? inrPlain(cell) : String(cell);
-      const parts = doc.splitTextToSize(s, Math.max(8, colWidths[i] - 2));
+      const unbroken = typeof cell === 'number' || ['Invoice No', 'Status'].includes(args.headers[i]);
+      const parts = unbroken ? [s] : doc.splitTextToSize(s, Math.max(8, colWidths[i] - 2));
       return parts.length ? parts : [''];
     });
     const lines = Math.max(1, ...wrapped.map((w) => w.length));
     const rowH = lines * 4 + 1;
-    if (y + rowH > H - 14) {
+    if (y + rowH > H - 14 && rowH < H - 40) {
       doc.addPage();
       y = 14;
       drawHeaderRow();
       // Recompute after the page break (header changed y, not rowH).
     }
-    if (highlight) {
-      doc.setFillColor(204, 251, 241); // light teal, totals row only
-      doc.rect(M, y - 4, usable, rowH + 2, 'F');
-    }
-    wrapped.forEach((w, i) => {
-      w.forEach((line, li) => {
-        if (typeof row[i] === 'number') {
-          doc.text(line, colX[i] + colWidths[i] - 1, y + li * 4, { align: 'right' });
-        } else {
-          doc.text(line, colX[i] + 1, y + li * 4);
-        }
+    let offset = 0;
+    while (offset < lines) {
+      if (y + 5 > H - 14) { doc.addPage(); y = 14; drawHeaderRow(); }
+      const count = Math.min(lines - offset, Math.max(1, Math.floor((H - 14 - y) / 4)));
+      const segmentH = count * 4 + 1;
+      if (highlight) {
+        doc.setFillColor(...PRINT_FILL);
+        doc.rect(M, y - 4, usable, segmentH + 2, 'F');
+      }
+      doc.setFont('helvetica', bold ? 'bold' : 'normal');
+      wrapped.forEach((w, i) => {
+        w.slice(offset, offset + count).forEach((line, li) => {
+          doc.setFontSize(8);
+          doc.setFontSize(Math.min(8, 8 * (colWidths[i] - 2) / Math.max(doc.getTextWidth(line), 1)));
+          if (typeof row[i] === 'number') {
+            doc.text(line, colX[i] + colWidths[i] - 1, y + li * 4, { align: 'right' });
+          } else {
+            doc.text(line, colX[i] + 1, y + li * 4);
+          }
+        });
       });
-    });
-    y += rowH;
+      doc.setFontSize(8);
+      y += segmentH;
+      offset += count;
+    }
   };
 
   if (args.rows.length === 0) {
     doc.setFontSize(10);
     doc.text('No invoices match these filters.', M, y);
   } else {
+    if (y > H - 40) { doc.addPage(); y = 14; }
     drawHeaderRow();
     for (const row of args.rows) drawRow(row);
     if (args.totalsRow) {
       // Separator, then a clear gap before the totals row — the old
       // 1mm gap let the rule strike through the totals text.
       if (y > H - 24) { doc.addPage(); y = 14; drawHeaderRow(); }
-      doc.setDrawColor(15, 118, 110);
+      doc.setDrawColor(...PRINT_INK);
       doc.setLineWidth(0.6);
       doc.line(M, y, right, y);
       y += 5;
       drawRow(args.totalsRow, true, true);
+    }
+  }
+
+  if (args.summaryRows?.length) {
+    // A compact two-column summary keeps all invoice-level charges and totals
+    // visible even when the selected report is item-wise/HSN-wise or empty.
+    y += 10;
+    if (y + 15 > H - 14) { doc.addPage(); y = 14; }
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
+    doc.text('Net totals for the selected filters', M, y); y += 7;
+    const columnWidth = usable / 2;
+    for (let i = 0; i < args.summaryRows.length; i += 2) {
+      if (y + 6 > H - 14) { doc.addPage(); y = 14; }
+      doc.setFontSize(8);
+      let height = 6;
+      args.summaryRows.slice(i, i + 2).forEach(([label, value], column) => {
+        const x = M + column * columnWidth;
+        const lines: string[] = doc.splitTextToSize(String(label), columnWidth - 43);
+        height = Math.max(height, lines.length * 4 + 2);
+        doc.setFont('helvetica', label === 'Grand Total' ? 'bold' : 'normal');
+        doc.text(lines, x, y);
+        doc.text(typeof value === 'number' ? inrPlain(value) : String(value), x + columnWidth - 5, y, {align: 'right'});
+      });
+      y += height;
     }
   }
 
