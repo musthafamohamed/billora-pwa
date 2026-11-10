@@ -76,6 +76,6 @@ describe('saved invoice immutability', () => {
 
   it('allows finalizing a draft and cancelling a final invoice', () => {
     expect(() => assertInvoiceWrite(invoice('stored'), invoice('latest', 'FINAL'))).not.toThrow();
-    expect(() => assertInvoiceWrite(invoice('stored', 'FINAL'), invoice('cancel', 'CANCELLED'))).not.toThrow();
+    expect(() => assertInvoiceWrite(invoice('stored', 'FINAL'), invoice('stored', 'CANCELLED'))).not.toThrow();
   });
 });

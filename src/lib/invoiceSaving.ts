@@ -1,4 +1,5 @@
 import type { Invoice } from './types';
+import { validateInvoiceTransition } from '../../shared/billing/validation';
 
 /** One editor's writes run in order; an explicit save/finalize is the final
  * write, so a delayed background draft cannot downgrade it. */
@@ -31,8 +32,6 @@ export class InvoiceSaveQueue {
 }
 
 export function assertInvoiceWrite(previous: Invoice | undefined, next: Invoice): void {
-  if (previous && previous.status !== 'DRAFT'
-    && !(previous.status === 'FINAL' && next.status === 'CANCELLED')) {
-    throw new Error('This invoice is already final or cancelled. Reload it before making changes.');
-  }
+  const errors = validateInvoiceTransition(previous, next);
+  if (errors.length) throw new Error(errors.map(e => e.message).join(' '));
 }

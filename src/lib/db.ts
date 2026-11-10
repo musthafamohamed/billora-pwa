@@ -1,16 +1,17 @@
 import Dexie, { type Table } from 'dexie';
 import type { BusinessProfile, Customer, Invoice, Product } from './types';
+import { DataValidationError, decodeProfile, requireDecoded } from './data/codecs';
 
 export interface MetaRow { key: string; value: string }
 
-class SimpleBillDB extends Dexie {
+export class SimpleBillDB extends Dexie {
   products!: Table<Product, string>;
   customers!: Table<Customer, string>;
   invoices!: Table<Invoice, string>;
   meta!: Table<MetaRow, string>;
 
-  constructor() {
-    super('simple-bill-db');
+  constructor(name = 'simple-bill-db') {
+    super(name);
     // Version 1: keep the schema stable across upgrades so existing
     // IndexedDB data survives normal app updates.
     this.version(1).stores({
@@ -24,21 +25,25 @@ class SimpleBillDB extends Dexie {
 
 export const db = new SimpleBillDB();
 
-export async function getProfile(): Promise<BusinessProfile | null> {
-  const row = await db.meta.get('profile');
+export async function getProfile(database: SimpleBillDB = db): Promise<BusinessProfile | null> {
+  const row = await database.meta.get('profile');
   if (!row) return null;
-  try { return JSON.parse(row.value) as BusinessProfile; } catch { return null; }
+  let value: unknown;
+  try { value = JSON.parse(row.value); } catch {
+    throw new DataValidationError([{ code: 'json', path: 'profile', message: 'Stored business profile is not valid JSON.', severity: 'error' }]);
+  }
+  return requireDecoded(decodeProfile(value));
 }
 
-export async function saveProfile(profile: BusinessProfile): Promise<void> {
-  await db.meta.put({ key: 'profile', value: JSON.stringify(profile) });
+export async function saveProfile(profile: BusinessProfile, database: SimpleBillDB = db): Promise<void> {
+  await database.meta.put({ key: 'profile', value: JSON.stringify(requireDecoded(decodeProfile(profile))) });
 }
 
-export async function getMeta(key: string): Promise<string | null> {
-  const row = await db.meta.get(key);
+export async function getMeta(key: string, database: SimpleBillDB = db): Promise<string | null> {
+  const row = await database.meta.get(key);
   return row ? row.value : null;
 }
 
-export async function setMeta(key: string, value: string): Promise<void> {
-  await db.meta.put({ key, value });
+export async function setMeta(key: string, value: string, database: SimpleBillDB = db): Promise<void> {
+  await database.meta.put({ key, value });
 }

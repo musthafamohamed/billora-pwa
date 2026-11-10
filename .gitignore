@@ -6,3 +6,4 @@ dev-dist/
 !.env.example
 *.log
 .DS_Store
+.firebase/

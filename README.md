@@ -1,14 +1,25 @@
 # Simple Bill
 
-A simple, fast, mobile-first Progressive Web App for a single business owner/operator
-to create customer invoices. No accounts, no backend, no cloud sync — all data lives
-in the browser on the device, and the app works offline after the first load.
+Billora now includes a **Phase 2 authentication pilot**. The default entry supports
+Firebase email/password sign-in and session restoration, but every business
+workspace remains blocked pending trusted membership and tenant-scoped storage.
+Authentication never exposes or adopts the existing local billing database.
+
+The original mobile-first offline billing app remains available through
+`npm run dev:legacy` on a separate development origin. Its data stays in that
+browser's IndexedDB; no legacy migration or cloud synchronization is implemented.
+The legacy flag is ignored in production builds. No live deployment or Firebase
+rule/billing change is part of Phase 2.
+
+See [Phase 2 setup and session policy](docs/architecture/PHASE_2_AUTH_SESSION.md),
+[implementation results](docs/implementation/PHASE_2_IMPLEMENTATION_REPORT.md), and
+[dependency assessment](docs/security/PHASE_2_DEPENDENCY_ASSESSMENT.md).
 
 Original code and design. Inspired only in general layout feel (compact dashboard,
 large quick actions, bottom navigation) by a personal-finance dashboard; no brand,
 source code, assets, or content were copied from anywhere.
 
-## What it does
+## Legacy billing features (development mode)
 
 - **Dashboard** — greeting/business name, this-month total and count, outstanding
   amount (final invoices that have a due date, labelled as such), recent invoices,
@@ -121,17 +132,30 @@ anything, and asks for confirmation first.
 
 ## Local setup
 
-Requires Node.js 20+ and npm.
+Use Node.js 22+ and npm (verified with Node 24.22); the Firestore emulator also
+requires Java 21+. For the auth pilot, copy `.env.example` to ignored `.env.local`
+and supply the **public** Billora Web PWA configuration for project `billora-pwa`.
+Never put Admin credentials or service-account keys in Vite variables. Missing
+configuration shows a closed sign-in gate rather than opening legacy data.
 
 ```bash
-cd simple-bill
 npm install
-npm run dev        # development server (Vite)
-npm run typecheck  # tsc --noEmit
-npm test           # Vitest (unit tests)
-npm run build      # typecheck + production build into dist/
-npm run preview    # serve the production build locally
+npm run dev             # auth pilot (default port 5173)
+npm run dev:legacy      # existing local billing only (127.0.0.1:5174)
+npm run typecheck
+npm test                # normal regression/session/UI tests
+npm run test:emulators  # isolated demo Auth/Firestore tests; no live credentials
+npm run build           # auth-only production build, tenant workspace unavailable
+npm run preview
 ```
+
+For local emulator login, use the commented **demo** values in `.env.example`, run
+`npm run emulators` and `npm run dev`; do not use live credentials. Keep the legacy
+and pilot servers on separate origins. Browser storage is hostname/port-specific:
+records on another origin remain intact and are not automatically copied. See the
+session-policy document before selecting an old loopback origin for legacy mode.
+The existing deployment workflow is unchanged; do not deploy the Phase 2 pilot as
+a complete authenticated billing workspace.
 
 Icons are original artwork generated locally by `scripts/make-icons.py`
 (Pillow): `public/icons/icon-192.png`, `icon-512.png`, `maskable-512.png`.

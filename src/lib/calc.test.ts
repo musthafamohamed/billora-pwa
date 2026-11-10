@@ -4,6 +4,7 @@ import { amountInWords, numberToIndianWords } from './words';
 import { nextInvoiceNumber } from './invoiceNumber';
 import { parseBackup, validateBackup } from './backup';
 import type { Invoice } from './types';
+import { backup as validBackup } from './data/fixtures.test-support';
 
 describe('rounding', () => {
   it('rounds half-up to 2dp', () => {
@@ -95,11 +96,7 @@ describe('additional charge (Rent) and tax-split override', () => {
     expect(calcInvoice([line], 'TAX', 'Kerala', 'Kerala', { taxSplit: 'GST' }).taxBreakdown.kind).toBe('GST');
   });
   it('accepts an old backup invoice without charge/taxSplit fields', () => {
-    const old = {
-      app: 'simple-bill', version: 1, exportedAt: new Date().toISOString(), profile: null,
-      products: [], customers: [],
-      invoices: [{ id: 'i1', invoiceNumber: 'INV-2026-0001', invoiceType: 'TAX', status: 'FINAL', lineItems: [], customerSnapshot: {}, businessSnapshot: {}, grandTotal: 10 }],
-    };
+    const old = validBackup();
     expect(validateBackup(old)).toEqual([]);
   });
 });
@@ -213,12 +210,7 @@ describe('amount in words (Indian system)', () => {
 });
 
 describe('backup validation', () => {
-  const valid = {
-    app: 'simple-bill', version: 1, exportedAt: new Date().toISOString(), profile: null,
-    products: [{ id: 'p1', name: 'A', sellingPrice: 10 }],
-    customers: [{ id: 'c1', name: 'X', phone: '123' }],
-    invoices: [{ id: 'i1', invoiceNumber: 'INV-2026-0001', invoiceType: 'TAX', status: 'FINAL', lineItems: [], customerSnapshot: {}, businessSnapshot: {}, grandTotal: 10 }],
-  };
+  const valid = validBackup();
   it('accepts a valid export', () => {
     expect(validateBackup(valid)).toEqual([]);
     expect(parseBackup(JSON.stringify(valid)).data).not.toBeNull();
