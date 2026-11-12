@@ -8,8 +8,8 @@ Authentication never exposes or adopts the existing local billing database.
 The original mobile-first offline billing app remains available through
 `npm run dev:legacy` on a separate development origin. Its data stays in that
 browser's IndexedDB; no legacy migration or cloud synchronization is implemented.
-The legacy flag is ignored in production builds. No live deployment or Firebase
-rule/billing change is part of Phase 2.
+The legacy flag is ignored in production builds. Production deployment is limited
+to the authentication pilot; Firebase rules and billing settings are unchanged.
 
 See [Phase 2 setup and session policy](docs/architecture/PHASE_2_AUTH_SESSION.md),
 [implementation results](docs/implementation/PHASE_2_IMPLEMENTATION_REPORT.md), and
@@ -154,8 +154,11 @@ For local emulator login, use the commented **demo** values in `.env.example`, r
 and pilot servers on separate origins. Browser storage is hostname/port-specific:
 records on another origin remain intact and are not automatically copied. See the
 session-policy document before selecting an old loopback origin for legacy mode.
-The existing deployment workflow is unchanged; do not deploy the Phase 2 pilot as
-a complete authenticated billing workspace.
+For GitHub Pages, configure the four existing `VITE_FIREBASE_*` repository Actions
+variables before releasing. The workflow validates their presence and passes them
+to Vite at build time; changing a variable requires a new build/deployment. Follow
+the [Phase 2 production checklist](docs/implementation/PHASE_2_DEPLOYMENT_FIX.md).
+The deployed pilot keeps every business workspace blocked until Phase 3.
 
 Icons are original artwork generated locally by `scripts/make-icons.py`
 (Pillow): `public/icons/icon-192.png`, `icon-512.png`, `maskable-512.png`.
